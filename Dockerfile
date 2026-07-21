@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     weston \
     seatd \
     xvfb \
+    x11-utils \
     libwayland-client0 \
     libwayland-cursor0 \
     libwayland-egl1 \

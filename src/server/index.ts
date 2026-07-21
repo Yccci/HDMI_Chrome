@@ -412,12 +412,17 @@ class ChromeProcessManager {
     ];
 
     console.log(`Starting Chrome (${this.config.chromeBin}):`, args.join(' '));
+    console.log(`Chrome env DISPLAY=${process.env.DISPLAY ?? ''} WAYLAND_DISPLAY=${process.env.WAYLAND_DISPLAY ?? ''}`);
 
     this.process = spawn(this.config.chromeBin, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? '/tmp/runtime-root'
+        DISPLAY: process.env.DISPLAY ?? '',
+        WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? '',
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? '/tmp/runtime-root',
+        // 减少无 dbus 时的噪音（可选）
+        DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS ?? 'unix:path=/dev/null'
       }
     });
 
