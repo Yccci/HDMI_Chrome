@@ -1,5 +1,9 @@
 FROM node:22-slim
 
+LABEL org.opencontainers.image.source="https://github.com/Yccci/HDMI_Chrome"
+LABEL org.opencontainers.image.description="HDMI Chrome Browser - Chrome kiosk with remote control"
+LABEL org.opencontainers.image.licenses="MIT"
+
 WORKDIR /app
 
 # 运行时与 Chrome 依赖

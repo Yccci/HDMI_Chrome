@@ -1,7 +1,9 @@
 services:
   hdmi-chrome-browser:
+    # 本地构建：docker compose up -d --build
+    # 或直接拉 GHCR：取消 build，改用下方 image
     build: .
-    image: hdmi-chrome-browser:latest
+    image: ghcr.io/yccci/hdmi_chrome:latest
     container_name: hdmi-chrome-browser
     restart: unless-stopped
     privileged: true

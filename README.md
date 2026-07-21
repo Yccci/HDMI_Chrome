@@ -31,9 +31,18 @@
 
 ### 1. Docker 部署（推荐）
 
+本地构建：
+
 ```bash
 docker compose up -d --build
 docker compose logs -f
+```
+
+或拉取 GHCR 镜像（`main` 推送后由 Actions 自动发布）：
+
+```bash
+docker pull ghcr.io/yccci/hdmi_chrome:latest
+# 私有包需先登录：echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
 ```
 
 访问：
@@ -43,7 +52,8 @@ PC / 手机:  http://<host>:8088   # 按 UA 自动分流镜像页 / 触控页
 DevTools:   http://<host>:9222
 ```
 
-> Compose 使用 `network_mode: host`，便于本机 HDMI 与 DevTools 访问。
+> Compose 使用 `network_mode: host`，便于本机 HDMI 与 DevTools 访问。  
+> 镜像仅构建 `linux/amd64`（依赖 Google Chrome deb）。
 
 ### 2. 本地开发
 
