@@ -23,10 +23,8 @@ services:
       - CHROME_DEBUG_PORT=9222
       - BROWSER_DATA_DIR=/app/data
       - BROWSER_MANAGE_CHROME=true
-      # virtual=无电视远程调画面；hdmi=接显示器本机出屏
-      - DISPLAY_MODE=${DISPLAY_MODE:-virtual}
-      - CHROME_OZONE_PLATFORM=${CHROME_OZONE_PLATFORM:-x11}
-      - CHROME_ENABLE_GPU=${CHROME_ENABLE_GPU:-false}
+      # auto=有 HDMI connected 用物理屏，否则虚拟屏；也可强制 virtual / hdmi
+      - DISPLAY_MODE=${DISPLAY_MODE:-auto}
       - XVFB_RESOLUTION=${XVFB_RESOLUTION:-1920x1080x24}
       - XDG_RUNTIME_DIR=/tmp/runtime-root
 

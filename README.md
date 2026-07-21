@@ -31,19 +31,23 @@
 
 ### 1. Docker 部署（推荐）
 
-适用于两种模式：
+默认 **自动选屏**：
 
-| `DISPLAY_MODE` | 场景 |
+| `DISPLAY_MODE` | 行为 |
 |----------------|------|
-| `virtual`（默认） | **不插电视**：Xvfb 虚拟屏，用手机/PC 打开 `:8088` 看镜像调试 |
-| `hdmi` | 接好显示器后本机 Weston → HDMI 出屏 |
+| `auto`（默认） | 检测 DRM：有 `connected` → 物理屏（Weston/HDMI）；否则 → 虚拟屏（Xvfb） |
+| `virtual` | 强制虚拟屏（远程镜像调试） |
+| `hdmi` | 强制物理屏（需已接显示器） |
+
+物理屏启动失败时会自动回退到虚拟屏。
 
 ```bash
-# 远程调试画面（默认 virtual，无需显示器）
 docker compose up -d --build
-# 浏览器打开 http://<host>:8088
+# 看日志中的 Mode: auto → virtual 或 auto → hdmi
+docker compose logs -f
 
-# 以后要本机 HDMI：
+# 强制某一模式：
+# DISPLAY_MODE=virtual docker compose up -d
 # DISPLAY_MODE=hdmi docker compose up -d
 ```
 
@@ -57,17 +61,16 @@ docker compose up -d
 访问：
 
 ```
-PC / 手机:  http://<host>:8088   # 遥控 + 镜像（virtual/hdmi 都可用）
+PC / 手机:  http://<host>:8088   # 遥控 + 镜像
 DevTools:   http://<host>:9222
-电视/HDMI:  仅 DISPLAY_MODE=hdmi 且显示器 connected
+电视/HDMI:  仅在检测到 connected 并走 hdmi 时出屏
 ```
 
 关键环境变量：
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `DISPLAY_MODE` | `virtual` | `virtual` / `hdmi` |
-| `CHROME_ENABLE_GPU` | `false`（virtual） | hdmi 模式可改 `true` |
+| `DISPLAY_MODE` | `auto` | `auto` / `virtual` / `hdmi` |
 | `XVFB_RESOLUTION` | `1920x1080x24` | 虚拟屏分辨率 |
 | `BROWSER_HOME_URL` | bing | 开机打开的网页 |
 

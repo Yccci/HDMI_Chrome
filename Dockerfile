@@ -74,9 +74,7 @@ ENV NODE_ENV=production \
     BROWSER_HOME_URL=https://www.bing.com \
     BROWSER_DATA_DIR=/app/data \
     BROWSER_MANAGE_CHROME=true \
-    DISPLAY_MODE=virtual \
-    CHROME_OZONE_PLATFORM=x11 \
-    CHROME_ENABLE_GPU=false \
+    DISPLAY_MODE=auto \
     XDG_RUNTIME_DIR=/tmp/runtime-root
 
 CMD ["./scripts/container-entrypoint.sh"]
