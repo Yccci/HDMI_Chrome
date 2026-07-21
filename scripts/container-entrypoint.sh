@@ -27,8 +27,9 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
-log() { echo -e "${GREEN}[HDMI Chrome]${NC} $1"; }
-warn() { echo -e "${YELLOW}[HDMI Chrome]${NC} $1"; }
+# 日志必须走 stderr，避免污染 $(...) 捕获
+log() { echo -e "${GREEN}[HDMI Chrome]${NC} $1" >&2; }
+warn() { echo -e "${YELLOW}[HDMI Chrome]${NC} $1" >&2; }
 error() { echo -e "${RED}[HDMI Chrome]${NC} $1" >&2; }
 
 has_connected_display() {
@@ -40,25 +41,29 @@ has_connected_display() {
     [ -f "$s" ] || continue
     status="$(cat "$s" 2>/dev/null || true)"
     if [ "${status}" = "connected" ]; then
-      log "检测到已连接输出: ${s#"${s%/*}"/} (${s})"
+      log "检测到已连接输出: $(basename "$(dirname "$s")") status=connected"
       return 0
     fi
   done
   return 1
 }
 
+# 结果写入全局 EFFECTIVE_MODE，不通过 stdout 回传
 resolve_display_mode() {
   case "${DISPLAY_MODE}" in
     auto|detect|"")
       if has_connected_display; then
-        echo "hdmi"
+        EFFECTIVE_MODE=hdmi
       else
         warn "未检测到 connected 的 DRM 输出 → 使用虚拟屏"
-        echo "virtual"
+        EFFECTIVE_MODE=virtual
       fi
       ;;
-    hdmi|weston|virtual|xvfb|debug)
-      echo "${DISPLAY_MODE}"
+    hdmi|weston)
+      EFFECTIVE_MODE=hdmi
+      ;;
+    virtual|xvfb|debug)
+      EFFECTIVE_MODE=virtual
       ;;
     *)
       error "未知 DISPLAY_MODE=${DISPLAY_MODE}（支持 auto | virtual | hdmi）"
@@ -95,7 +100,7 @@ start_virtual() {
   fi
   export DISPLAY
   unset WAYLAND_DISPLAY || true
-  export CHROME_OZONE_PLATFORM="${CHROME_OZONE_PLATFORM:-x11}"
+  export CHROME_OZONE_PLATFORM=x11
   export CHROME_ENABLE_GPU="${CHROME_ENABLE_GPU:-false}"
   log "DISPLAY=${DISPLAY}  ozone=${CHROME_OZONE_PLATFORM}  gpu=${CHROME_ENABLE_GPU}"
   log "打开 http://<主机>:${BROWSER_PORT} 查看镜像画面"
@@ -109,7 +114,8 @@ export BROWSER_MANAGE_CHROME="${BROWSER_MANAGE_CHROME:-true}"
 export BROWSER_PORT CHROME_DEBUG_PORT BROWSER_HOME_URL BROWSER_DATA_DIR XDG_RUNTIME_DIR
 
 REQUESTED_MODE="${DISPLAY_MODE}"
-EFFECTIVE_MODE="$(resolve_display_mode)"
+EFFECTIVE_MODE=""
+resolve_display_mode
 export DISPLAY_MODE="${EFFECTIVE_MODE}"
 
 log "=========================================="
@@ -138,24 +144,32 @@ trap cleanup SIGINT SIGTERM
 cd /app
 
 case "${EFFECTIVE_MODE}" in
-  hdmi|weston)
+  hdmi)
     if ! start_hdmi; then
       warn "物理屏/Weston 启动失败，回退到虚拟屏"
       tail -n 40 /tmp/weston.log 2>/dev/null || true
       WESTON_PID=""
-      # 清除可能被强制的 wayland 相关设置，让虚拟屏用默认值
       unset WAYLAND_DISPLAY || true
       unset CHROME_OZONE_PLATFORM || true
       unset CHROME_ENABLE_GPU || true
       EFFECTIVE_MODE=virtual
       export DISPLAY_MODE=virtual
-      start_virtual
+      start_virtual || exit 1
     fi
     ;;
-  virtual|xvfb|debug)
-    start_virtual
+  virtual)
+    start_virtual || exit 1
+    ;;
+  *)
+    error "内部错误: EFFECTIVE_MODE=${EFFECTIVE_MODE}"
+    exit 1
     ;;
 esac
+
+if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+  error "显示栈未就绪（无 DISPLAY / WAYLAND_DISPLAY），拒绝启动 Chrome"
+  exit 1
+fi
 
 log "启动后端 (Node 将拉起 Chrome)..."
 exec node dist/server/index.js
