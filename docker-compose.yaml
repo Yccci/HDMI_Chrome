@@ -22,8 +22,11 @@ services:
       - BROWSER_HOME_URL=${BROWSER_HOME_URL:-https://www.bing.com}
       - CHROME_DEBUG_PORT=${CHROME_DEBUG_PORT:-9222}
       - BROWSER_DATA_DIR=/app/data
-      - ENABLE_KIOSK=${ENABLE_KIOSK:-true}
+      - BROWSER_MANAGE_CHROME=true
       - DISPLAY=${DISPLAY:-:0}
+      - CHROME_OZONE_PLATFORM=${CHROME_OZONE_PLATFORM:-x11}
+      - CHROME_ENABLE_GPU=${CHROME_ENABLE_GPU:-true}
+      - XDG_RUNTIME_DIR=/tmp/runtime-root
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
 

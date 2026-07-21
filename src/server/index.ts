@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
-import { exec, type ChildProcess } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { spawn, type ChildProcess } from 'child_process';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 
@@ -9,18 +9,76 @@ interface BrowserConfig {
   homeUrl: string;
   chromePort: number;
   dataDir: string;
+  manageChrome: boolean;
+  chromeBin: string;
 }
 
 function loadConfig(): BrowserConfig {
   const port = Number(process.env.BROWSER_PORT ?? "8088");
   const chromePort = Number(process.env.CHROME_DEBUG_PORT ?? "9222");
-  
+  const manageChrome = !['0', 'false', 'no'].includes(
+    (process.env.BROWSER_MANAGE_CHROME ?? 'true').toLowerCase()
+  );
+
   return {
     port,
     homeUrl: process.env.BROWSER_HOME_URL ?? "https://www.bing.com",
     chromePort,
-    dataDir: process.env.BROWSER_DATA_DIR ?? "./data"
+    dataDir: process.env.BROWSER_DATA_DIR ?? "./data",
+    manageChrome,
+    chromeBin: process.env.CHROME_BIN ?? "google-chrome"
   };
+}
+
+function resolveOzonePlatform(): string {
+  if (process.env.CHROME_OZONE_PLATFORM) {
+    return process.env.CHROME_OZONE_PLATFORM;
+  }
+  if (process.env.WAYLAND_DISPLAY) {
+    return 'wayland';
+  }
+  return 'x11';
+}
+
+function buildChromeArgs(config: BrowserConfig, targetUrl: string): string[] {
+  const ozone = resolveOzonePlatform();
+  const enableGpu = !['0', 'false', 'no'].includes(
+    (process.env.CHROME_ENABLE_GPU ?? 'true').toLowerCase()
+  );
+
+  const args = [
+    '--kiosk',
+    '--noerrdialogs',
+    '--disable-infobars',
+    '--disable-session-crashed-bubble',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-sync',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    `--remote-debugging-port=${config.chromePort}`,
+    '--remote-debugging-address=0.0.0.0',
+    `--ozone-platform=${ozone}`,
+    '--autoplay-policy=no-user-gesture-required',
+    '--ignore-gpu-blocklist',
+  ];
+
+  if (enableGpu) {
+    args.push(
+      '--enable-gpu',
+      '--enable-gpu-rasterization',
+      '--disable-gpu-sandbox',
+      '--enable-features=VaapiVideoDecoder,VaapiVideoEncoder,VaapiVideoDecodeLinuxGL',
+      '--enable-accelerated-video-decode',
+      '--use-gl=egl'
+    );
+  } else {
+    args.push('--disable-gpu', '--use-gl=swiftshader');
+  }
+
+  args.push(targetUrl);
+  return args;
 }
 
 // 检测是否是移动设备
@@ -307,79 +365,68 @@ class ChromeProcessManager {
     this.config = config;
   }
 
+  private profileDir(): string {
+    return join(this.config.dataDir, 'chrome-profile');
+  }
+
+  private clearLocks(): void {
+    const dir = this.profileDir();
+    for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+      const path = join(dir, name);
+      try {
+        if (existsSync(path)) unlinkSync(path);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   start(url?: string): void {
     if (this.process) {
       this.stop();
     }
 
     const targetUrl = url || this.config.homeUrl;
+    const profileDir = this.profileDir();
+    mkdirSync(join(profileDir, 'Default'), { recursive: true });
+    this.clearLocks();
+
     const args = [
-      // Kiosk 模式
-      '--kiosk',
-      '--noerrdialogs',
-      '--disable-infobars',
-      '--disable-session-crashed-bubble',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-sync',
-      
-      // 远程调试
-      `--remote-debugging-port=${this.config.chromePort}`,
-      '--remote-debugging-address=0.0.0.0',
-      
-      // GPU 硬件加速
-      '--enable-gpu',
-      '--enable-gpu-rasterization',
-      '--enable-features=VaapiVideoDecoder',
-      '--enable-features=VaapiVideoEncoder',
-      '--enable-features=VaapiVideoDecodeLinuxGL',
-      '--enable-features=PlatformHEVCDecoderSupport',
-      '--enable-features=PlatformHEVCEncoderSupport',
-      '--disable-features=UseChromeOSDirectVideoDecoder',
-      '--enable-zero-copy',
-      '--enable-hardware-overlays',
-      
-      // 渲染优化
-      '--use-gl=egl',
-      '--ozone-platform=wayland',
-      '--in-process-gpu',
-      '--disable-gpu-sandbox',
-      '--ignore-gpu-blocklist',
-      
-      // 视频解码优化
-      '--enable-accelerated-video-decode',
-      '--enable-accelerated-mjpeg-decode',
-      '--enable-accelerated-2d-canvas',
-      '--use-vulkan',
-      '--enable-vulkan',
-      
-      // 内存优化
-      '--disable-dev-shm-usage',
-      '--disable-software-rasterizer',
-      
-      // 媒体优化
-      '--autoplay-policy=no-user-gesture-required',
-      
-      targetUrl
+      `--user-data-dir=${profileDir}`,
+      ...buildChromeArgs(this.config, targetUrl)
     ];
 
-    console.log('Starting Chrome with args:', args.join(' '));
-    
-    this.process = exec(`google-chrome ${args.join(' ')}`);
-    
-    this.process.on('error', (error) => {
-      console.error('Chrome process error:', error);
+    console.log(`Starting Chrome (${this.config.chromeBin}):`, args.join(' '));
+
+    this.process = spawn(this.config.chromeBin, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? '/tmp/runtime-root'
+      }
     });
 
-    this.process.on('exit', (code) => {
-      console.log(`Chrome exited with code ${code}`);
+    this.process.stdout?.on('data', (chunk: Buffer) => {
+      console.log(`[chrome] ${chunk.toString().trimEnd()}`);
+    });
+    this.process.stderr?.on('data', (chunk: Buffer) => {
+      console.error(`[chrome] ${chunk.toString().trimEnd()}`);
+    });
+
+    this.process.on('error', (error) => {
+      console.error('Chrome process error:', error);
+      this.process = null;
+    });
+
+    this.process.on('exit', (code, signal) => {
+      console.log(`Chrome exited with code ${code} signal ${signal}`);
       this.process = null;
     });
   }
 
   stop(): void {
     if (this.process) {
-      this.process.kill();
+      this.process.kill('SIGTERM');
       this.process = null;
     }
   }
@@ -390,7 +437,7 @@ class ChromeProcessManager {
   }
 
   isRunning(): boolean {
-    return this.process !== null;
+    return this.process !== null && this.process.exitCode === null;
   }
 }
 
@@ -500,11 +547,26 @@ async function startServer(): Promise<void> {
   const chromeProcess = new ChromeProcessManager(config);
   const mirrorStream = new ScreenMirrorStream(chrome);
 
-  chromeProcess.start(currentUrl);
-  
-  setTimeout(() => {
-    chrome.connect();
-  }, 2000);
+  if (config.manageChrome) {
+    chromeProcess.start(currentUrl);
+  } else {
+    console.log('BROWSER_MANAGE_CHROME=false, waiting for external Chrome on debug port');
+  }
+
+  // 等 CDP 端口就绪再连（Chrome 冷启动常超过 2s）
+  void (async () => {
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${config.chromePort}/json/version`);
+        if (res.ok) break;
+      } catch {
+        // retry
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    await chrome.connect();
+  })();
 
   // WebSocket 服务器用于屏幕镜像
   const wss = new WebSocketServer({ noServer: true });
