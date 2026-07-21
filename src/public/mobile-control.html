@@ -539,12 +539,10 @@
     setInterval(checkStatus, 3000);
     checkStatus();
     
-    // 触摸事件
+    // 触摸事件：触控板相对移动 dx/dy，点击落在服务端当前光标位置
     touchpad.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      
       touchCount = e.touches.length;
-      
       if (touchCount === 1) {
         touchStartX = e.touches[0].clientX;
         touchStartY = e.touches[0].clientY;
@@ -552,10 +550,7 @@
         lastTouchY = touchStartY;
         touchStartTime = Date.now();
         isLongPress = false;
-        
         touchpadHint.classList.add('hidden');
-        
-        // 长按检测
         longPressTimer = setTimeout(() => {
           isLongPress = true;
           vibrate(30);
@@ -565,37 +560,20 @@
     
     touchpad.addEventListener('touchmove', (e) => {
       e.preventDefault();
-      
       if (touchCount === 1) {
-        // 单指移动 = 鼠标移动
-        const deltaX = (e.touches[0].clientX - lastTouchX) * sensitivity;
-        const deltaY = (e.touches[0].clientY - lastTouchY) * sensitivity;
-        
-        // 获取触摸板位置
-        const rect = touchpad.getBoundingClientRect();
-        const touchX = e.touches[0].clientX - rect.left;
-        const touchY = e.touches[0].clientY - rect.top;
-        
-        // 更新光标位置
+        const deltaX = (e.touches[0].clientX - lastTouchX) * sensitivity * 2.5;
+        const deltaY = (e.touches[0].clientY - lastTouchY) * sensitivity * 2.5;
         if (showCursor) {
           cursor.style.display = 'block';
           cursor.style.left = `${e.touches[0].clientX}px`;
           cursor.style.top = `${e.touches[0].clientY}px`;
         }
-        
-        // 发送鼠标移动
-        api('/api/mouse/move', 'POST', { 
-          x: touchX * (1920 / rect.width), 
-          y: touchY * (1080 / rect.height) 
-        });
-        
+        api('/api/mouse/move', 'POST', { dx: deltaX, dy: deltaY });
         lastTouchX = e.touches[0].clientX;
         lastTouchY = e.touches[0].clientY;
       } else if (touchCount === 2) {
-        // 双指滑动 = 滚动
         const deltaY = (e.touches[0].clientY - lastTouchY) * 2;
         api('/api/mouse/scroll', 'POST', { deltaX: 0, deltaY: -deltaY });
-        
         lastTouchX = e.touches[0].clientX;
         lastTouchY = e.touches[0].clientY;
       }
@@ -603,34 +581,20 @@
     
     touchpad.addEventListener('touchend', (e) => {
       e.preventDefault();
-      
       clearTimeout(longPressTimer);
-      
       if (touchCount === 1) {
         const duration = Date.now() - touchStartTime;
-        const rect = touchpad.getBoundingClientRect();
-        const x = (lastTouchX - touchStartX) * (1920 / rect.width);
-        const y = (lastTouchY - touchStartY) * (1080 / rect.height);
-        
-        if (isLongPress) {
-          // 长按 = 右键
-          api('/api/mouse/click', 'POST', { 
-            x: lastTouchX * (1920 / rect.width), 
-            y: lastTouchY * (1080 / rect.height), 
-            button: 'right' 
-          });
-          vibrate(50);
-        } else if (duration < 300 && Math.abs(x) < 10 && Math.abs(y) < 10) {
-          // 短按 = 左键
-          api('/api/mouse/click', 'POST', { 
-            x: lastTouchX * (1920 / rect.width), 
-            y: lastTouchY * (1080 / rect.height), 
-            button: 'left' 
-          });
-          vibrate(10);
+        const moved = Math.hypot(lastTouchX - touchStartX, lastTouchY - touchStartY);
+        if (moved < 15) {
+          if (isLongPress || duration >= longPressTime) {
+            api('/api/mouse/click', 'POST', { button: 'right' });
+            vibrate(50);
+          } else {
+            api('/api/mouse/click', 'POST', { button: 'left' });
+            vibrate(10);
+          }
         }
       }
-      
       touchCount = 0;
       cursor.style.display = 'none';
       touchpadHint.classList.remove('hidden');

@@ -112,44 +112,177 @@ class ChromeController {
     this.currentUrl = config.homeUrl;
   }
 
+  private cursorX = 100;
+  private cursorY = 100;
+  private viewportWidth = 1920;
+  private viewportHeight = 1080;
+
+  getCursorPosition(): { x: number; y: number } {
+    return { x: this.cursorX, y: this.cursorY };
+  }
+
   async connect(): Promise<void> {
     try {
+      if (this.ws) {
+        try { this.ws.close(); } catch { /* ignore */ }
+        this.ws = null;
+      }
+
       const response = await fetch(`http://127.0.0.1:${this.config.chromePort}/json`);
-      const targets = await response.json() as any[];
-      
-      const pageTarget = targets.find((t: any) => t.type === 'page');
-      if (!pageTarget) {
+      const targets = await response.json() as Array<{ type: string; webSocketDebuggerUrl?: string }>;
+
+      const pageTarget = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
+      if (!pageTarget?.webSocketDebuggerUrl) {
         throw new Error('No page target found');
       }
 
-      this.ws = new WebSocket(pageTarget.webSocketDebuggerUrl);
-      
-      this.ws.onopen = () => {
-        console.log('Connected to Chrome');
-        this.clearReconnect();
-      };
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(pageTarget.webSocketDebuggerUrl!);
+        const timer = setTimeout(() => {
+          try { ws.close(); } catch { /* ignore */ }
+          reject(new Error('CDP websocket connect timeout'));
+        }, 10000);
 
-      this.ws.onmessage = (event) => {
-        const data = JSON.parse(String(event.data));
-        if (data.id && this.pendingCallbacks.has(data.id)) {
-          const callback = this.pendingCallbacks.get(data.id);
-          callback?.(data.result);
-          this.pendingCallbacks.delete(data.id);
-        }
-      };
+        ws.onopen = () => {
+          clearTimeout(timer);
+          this.ws = ws;
+          console.log('Connected to Chrome');
+          this.clearReconnect();
+          resolve();
+        };
 
-      this.ws.onclose = () => {
-        console.log('Disconnected from Chrome');
-        this.scheduleReconnect();
-      };
+        ws.onmessage = (event) => {
+          const data = JSON.parse(String(event.data));
+          if (data.id && this.pendingCallbacks.has(data.id)) {
+            const callback = this.pendingCallbacks.get(data.id);
+            callback?.(data.result);
+            this.pendingCallbacks.delete(data.id);
+          }
+        };
 
-      this.ws.onerror = (error) => {
-        console.error('Chrome WebSocket error:', error);
-      };
+        ws.onclose = () => {
+          console.log('Disconnected from Chrome');
+          this.ws = null;
+          this.scheduleReconnect();
+        };
+
+        ws.onerror = (error) => {
+          clearTimeout(timer);
+          console.error('Chrome WebSocket error:', error);
+          reject(new Error('CDP websocket error'));
+        };
+      });
+
+      await this.sendCommand('Page.enable', {});
+      await this.sendCommand('Runtime.enable', {});
+      await this.installCursorOverlay();
+      await this.refreshViewportSize();
     } catch (error) {
       console.error('Failed to connect to Chrome:', error);
       this.scheduleReconnect();
     }
+  }
+
+  private cursorOverlayScript(): string {
+    return `(() => {
+      const ID = '__hdmi_cursor_overlay';
+      if (document.getElementById(ID)) return true;
+      const style = document.createElement('style');
+      style.textContent = \`
+        #\${ID} {
+          position: fixed !important;
+          width: 22px !important;
+          height: 22px !important;
+          margin-left: -3px !important;
+          margin-top: -3px !important;
+          border: 2px solid #fff !important;
+          border-radius: 50% !important;
+          background: rgba(255, 64, 64, 0.85) !important;
+          box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 0 8px rgba(255,64,64,.8) !important;
+          pointer-events: none !important;
+          z-index: 2147483647 !important;
+          left: 0; top: 0;
+          transform: translate(-50%, -50%);
+        }
+        #\${ID}::after {
+          content: '';
+          position: absolute;
+          left: 50%; top: 50%;
+          width: 2px; height: 2px;
+          background: #fff;
+          transform: translate(-50%, -50%);
+        }
+      \`;
+      const dot = document.createElement('div');
+      dot.id = ID;
+      const root = document.documentElement;
+      (document.head || root).appendChild(style);
+      root.appendChild(dot);
+      window.__hdmiCursor = {
+        set(x, y) {
+          dot.style.left = x + 'px';
+          dot.style.top = y + 'px';
+        }
+      };
+      return true;
+    })()`;
+  }
+
+  async installCursorOverlay(): Promise<void> {
+    try {
+      await this.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+        source: this.cursorOverlayScript()
+      });
+      await this.sendCommand('Runtime.evaluate', {
+        expression: this.cursorOverlayScript(),
+        returnByValue: true
+      });
+      await this.updateCursorOverlay();
+    } catch (error) {
+      console.error('installCursorOverlay failed:', error);
+    }
+  }
+
+  async refreshViewportSize(): Promise<void> {
+    try {
+      const size = await this.getPageSize();
+      if (size.width > 0 && size.height > 0) {
+        this.viewportWidth = size.width;
+        this.viewportHeight = size.height;
+      }
+    } catch {
+      // keep defaults
+    }
+  }
+
+  private clampCursor(x: number, y: number): { x: number; y: number } {
+    return {
+      x: Math.max(0, Math.min(this.viewportWidth - 1, Math.round(x))),
+      y: Math.max(0, Math.min(this.viewportHeight - 1, Math.round(y)))
+    };
+  }
+
+  async updateCursorOverlay(): Promise<void> {
+    try {
+      await this.sendCommand('Runtime.evaluate', {
+        expression: `window.__hdmiCursor && window.__hdmiCursor.set(${this.cursorX}, ${this.cursorY})`,
+        returnByValue: true
+      });
+    } catch {
+      // page may be navigating
+    }
+  }
+
+  async setCursorAbsolute(x: number, y: number): Promise<void> {
+    const next = this.clampCursor(x, y);
+    this.cursorX = next.x;
+    this.cursorY = next.y;
+    await this.mouseMove(this.cursorX, this.cursorY);
+    await this.updateCursorOverlay();
+  }
+
+  async moveCursorBy(dx: number, dy: number): Promise<void> {
+    await this.setCursorAbsolute(this.cursorX + dx, this.cursorY + dy);
   }
 
   private scheduleReconnect(): void {
@@ -196,6 +329,10 @@ class ChromeController {
   async navigate(url: string): Promise<void> {
     this.currentUrl = url;
     await this.sendCommand('Page.navigate', { url });
+    setTimeout(() => {
+      void this.installCursorOverlay();
+      void this.refreshViewportSize();
+    }, 800);
   }
 
   async refresh(): Promise<void> {
@@ -272,23 +409,30 @@ class ChromeController {
 
   // 鼠标移动
   async mouseMove(x: number, y: number): Promise<void> {
+    const nx = Math.round(x);
+    const ny = Math.round(y);
     await this.sendCommand('Input.dispatchMouseEvent', {
       type: 'mouseMoved',
-      x,
-      y,
+      x: nx,
+      y: ny,
       button: 'none',
-      clickCount: 0
+      buttons: 0,
+      clickCount: 0,
+      pointerType: 'mouse'
     });
   }
 
   // 鼠标按下
   async mouseDown(x: number, y: number, button: 'left' | 'right' | 'middle' = 'left'): Promise<void> {
+    const buttons = button === 'left' ? 1 : button === 'right' ? 2 : 4;
     await this.sendCommand('Input.dispatchMouseEvent', {
       type: 'mousePressed',
-      x,
-      y,
+      x: Math.round(x),
+      y: Math.round(y),
       button,
-      clickCount: 1
+      buttons,
+      clickCount: 1,
+      pointerType: 'mouse'
     });
   }
 
@@ -296,27 +440,35 @@ class ChromeController {
   async mouseUp(x: number, y: number, button: 'left' | 'right' | 'middle' = 'left'): Promise<void> {
     await this.sendCommand('Input.dispatchMouseEvent', {
       type: 'mouseReleased',
-      x,
-      y,
+      x: Math.round(x),
+      y: Math.round(y),
       button,
-      clickCount: 1
+      buttons: 0,
+      clickCount: 1,
+      pointerType: 'mouse'
     });
   }
 
   // 鼠标点击
   async mouseClick(x: number, y: number, button: 'left' | 'right' | 'middle' = 'left'): Promise<void> {
-    await this.mouseDown(x, y, button);
-    await this.mouseUp(x, y, button);
+    const pos = this.clampCursor(x, y);
+    this.cursorX = pos.x;
+    this.cursorY = pos.y;
+    await this.mouseMove(pos.x, pos.y);
+    await this.updateCursorOverlay();
+    await this.mouseDown(pos.x, pos.y, button);
+    await this.mouseUp(pos.x, pos.y, button);
   }
 
   // 鼠标滚轮
   async mouseScroll(x: number, y: number, deltaX: number, deltaY: number): Promise<void> {
     await this.sendCommand('Input.dispatchMouseEvent', {
       type: 'mouseWheel',
-      x,
-      y,
+      x: Math.round(x),
+      y: Math.round(y),
       deltaX,
-      deltaY
+      deltaY,
+      pointerType: 'mouse'
     });
   }
 
@@ -714,51 +866,66 @@ async function startServer(): Promise<void> {
     }
   });
 
-  // API：鼠标移动
-  app.post<{ Body: { x: number; y: number } }>('/api/mouse/move', async (request, reply) => {
-    const { x, y } = request.body;
-    if (typeof x !== 'number' || typeof y !== 'number') {
-      reply.code(400);
-      return { error: 'x and y are required numbers' };
+  // API：鼠标移动（支持绝对 x/y 或相对 dx/dy）
+  app.post<{ Body: { x?: number; y?: number; dx?: number; dy?: number } }>('/api/mouse/move', async (request, reply) => {
+    if (!chrome.isConnected()) {
+      reply.code(503);
+      return { error: 'Chrome not connected' };
     }
-    
+    const { x, y, dx, dy } = request.body ?? {};
     try {
-      await chrome.mouseMove(x, y);
-      return { ok: true };
+      if (typeof dx === 'number' || typeof dy === 'number') {
+        await chrome.moveCursorBy(Number(dx) || 0, Number(dy) || 0);
+      } else if (typeof x === 'number' && typeof y === 'number') {
+        await chrome.setCursorAbsolute(x, y);
+      } else {
+        reply.code(400);
+        return { error: 'Provide x/y or dx/dy' };
+      }
+      return { ok: true, cursor: chrome.getCursorPosition() };
     } catch (error) {
-      return { error: 'Failed to move mouse' };
+      reply.code(500);
+      return { error: 'Failed to move mouse', detail: String(error) };
     }
   });
 
-  // API：鼠标点击
-  app.post<{ Body: { x: number; y: number; button?: string } }>('/api/mouse/click', async (request, reply) => {
-    const { x, y, button = 'left' } = request.body;
-    if (typeof x !== 'number' || typeof y !== 'number') {
-      reply.code(400);
-      return { error: 'x and y are required numbers' };
+  // API：鼠标点击（可省略坐标，点击当前光标位置）
+  app.post<{ Body: { x?: number; y?: number; button?: string } }>('/api/mouse/click', async (request, reply) => {
+    if (!chrome.isConnected()) {
+      reply.code(503);
+      return { error: 'Chrome not connected' };
     }
-    
+    const { x, y, button = 'left' } = request.body ?? {};
     try {
-      await chrome.mouseClick(x, y, button as any);
-      return { ok: true };
+      const pos = chrome.getCursorPosition();
+      const cx = typeof x === 'number' ? x : pos.x;
+      const cy = typeof y === 'number' ? y : pos.y;
+      await chrome.mouseClick(cx, cy, button as 'left' | 'right' | 'middle');
+      return { ok: true, cursor: chrome.getCursorPosition() };
     } catch (error) {
-      return { error: 'Failed to click' };
+      reply.code(500);
+      return { error: 'Failed to click', detail: String(error) };
     }
   });
 
   // API：鼠标滚轮
-  app.post<{ Body: { deltaX: number; deltaY: number } }>('/api/mouse/scroll', async (request, reply) => {
-    const { deltaX, deltaY } = request.body;
+  app.post<{ Body: { deltaX?: number; deltaY?: number } }>('/api/mouse/scroll', async (request, reply) => {
+    if (!chrome.isConnected()) {
+      reply.code(503);
+      return { error: 'Chrome not connected' };
+    }
+    const { deltaX = 0, deltaY = 0 } = request.body ?? {};
     if (typeof deltaX !== 'number' || typeof deltaY !== 'number') {
       reply.code(400);
       return { error: 'deltaX and deltaY are required numbers' };
     }
-    
     try {
-      await chrome.mouseScroll(0, 0, deltaX, deltaY);
+      const pos = chrome.getCursorPosition();
+      await chrome.mouseScroll(pos.x, pos.y, deltaX, deltaY);
       return { ok: true };
     } catch (error) {
-      return { error: 'Failed to scroll' };
+      reply.code(500);
+      return { error: 'Failed to scroll', detail: String(error) };
     }
   });
 
