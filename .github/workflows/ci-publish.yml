@@ -1,23 +1,48 @@
-name: Publish Docker image
+name: CI and Publish
 
 on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
+      - master
+  pull_request:
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-  # GHCR 要求镜像名全小写
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
+concurrency:
+  group: ci-publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and build
+        run: npm run verify
+
   publish:
+    # 仅推送主分支时发布；PR 只跑 verify
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -70,14 +95,16 @@ jobs:
 
       - name: Image summary
         run: |
-          echo "### Published to GHCR" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Pull example:" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-          echo "docker pull ${IMAGE_NAME}:latest" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Published to GHCR"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "Pull:"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${IMAGE_NAME}:latest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
