@@ -29,7 +29,8 @@ services:
       - XDG_RUNTIME_DIR=/tmp/runtime-root
 
     volumes:
-      - hdmi-chrome-data:/app/data
+      # 宿主机 ./data 持久化（Chrome profile、browser-state 等）
+      - ./data:/app/data
       - /dev/dri:/dev/dri
 
     shm_size: "2gb"
@@ -46,7 +47,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  hdmi-chrome-data:
-    driver: local
