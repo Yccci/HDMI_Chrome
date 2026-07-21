@@ -1,7 +1,5 @@
 services:
   hdmi-chrome-browser:
-    # 本地构建：docker compose up -d --build
-    # 或直接拉 GHCR：取消 build，改用下方 image
     build: .
     image: ghcr.io/yccci/hdmi_chrome:latest
     container_name: hdmi-chrome-browser
@@ -13,26 +11,25 @@ services:
       - /dev/snd:/dev/snd
       - /dev/input:/dev/input
 
-    # host 网络便于本机 HDMI / DevTools 访问；端口映射在 host 模式下无效
-    network_mode: host
+    # 飞牛等面板用端口映射；DRM 出屏不依赖 host 网络
+    ports:
+      - "${BROWSER_PORT:-8088}:8088"
+      - "${CHROME_DEBUG_PORT:-9222}:9222"
 
     environment:
       - NODE_ENV=production
-      - BROWSER_PORT=${BROWSER_PORT:-8088}
+      - BROWSER_PORT=8088
       - BROWSER_HOME_URL=${BROWSER_HOME_URL:-https://www.bing.com}
-      - CHROME_DEBUG_PORT=${CHROME_DEBUG_PORT:-9222}
+      - CHROME_DEBUG_PORT=9222
       - BROWSER_DATA_DIR=/app/data
       - BROWSER_MANAGE_CHROME=true
-      - DISPLAY=${DISPLAY:-:0}
-      - CHROME_OZONE_PLATFORM=${CHROME_OZONE_PLATFORM:-x11}
+      - ENABLE_WESTON=${ENABLE_WESTON:-true}
+      - CHROME_OZONE_PLATFORM=${CHROME_OZONE_PLATFORM:-wayland}
       - CHROME_ENABLE_GPU=${CHROME_ENABLE_GPU:-true}
       - XDG_RUNTIME_DIR=/tmp/runtime-root
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
 
     volumes:
-      - ./data:/app/data
-      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - hdmi-chrome-data:/app/data
       - /dev/dri:/dev/dri
 
     shm_size: "2gb"
@@ -42,7 +39,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 40s
 
     logging:
       driver: json-file

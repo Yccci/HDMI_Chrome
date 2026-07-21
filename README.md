@@ -31,9 +31,12 @@
 
 ### 1. Docker 部署（推荐）
 
-本地构建：
+适用于 **无桌面的 NAS/工控机**：容器内自启 **Weston (DRM) + Chrome**，本机 HDMI 出屏；手机/PC 通过 `8088` 遥控与镜像。
 
 ```bash
+# 先确认显示器已连接
+cat /sys/class/drm/card*-*/status   # 应有 connected
+
 docker compose up -d --build
 docker compose logs -f
 ```
@@ -43,17 +46,28 @@ docker compose logs -f
 ```bash
 docker pull ghcr.io/yccci/hdmi_chrome:latest
 # 私有包需先登录：echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+docker compose up -d
 ```
 
 访问：
 
 ```
-PC / 手机:  http://<host>:8088   # 按 UA 自动分流镜像页 / 触控页
+PC / 手机:  http://<host>:8088   # 遥控 + 镜像
 DevTools:   http://<host>:9222
+电视/HDMI:  本机 Weston + Chrome Kiosk
 ```
 
-> Compose 使用 `network_mode: host`，便于本机 HDMI 与 DevTools 访问。  
-> 镜像仅构建 `linux/amd64`（依赖 Google Chrome deb）。
+关键环境变量：
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `ENABLE_WESTON` | `true` | 容器内 DRM 显示栈 |
+| `CHROME_OZONE_PLATFORM` | `wayland` | 与 Weston 配合 |
+| `CHROME_ENABLE_GPU` | `true` | 失败时可设 `false` |
+| `BROWSER_HOME_URL` | bing | 开机打开的网页 |
+
+> 镜像仅构建 `linux/amd64`（依赖 Google Chrome deb）。  
+> 宿主机无需 X11/桌面；但需要 `/dev/dri` 且显示器 `connected`。
 
 ### 2. 本地开发
 

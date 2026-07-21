@@ -64,6 +64,10 @@ function buildChromeArgs(config: BrowserConfig, targetUrl: string): string[] {
     '--ignore-gpu-blocklist',
   ];
 
+  if (ozone === 'wayland') {
+    args.push('--enable-features=UseOzonePlatform');
+  }
+
   if (enableGpu) {
     args.push(
       '--enable-gpu',

@@ -6,13 +6,14 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
 
-# 运行时与 Chrome 依赖
+# 运行时、Chrome、Weston(DRM Kiosk) 依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     gnupg \
     ca-certificates \
     curl \
     fonts-liberation \
+    fontconfig \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
@@ -34,7 +35,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvdpau1 \
     mesa-va-drivers \
     mesa-vdpau-drivers \
+    libgl1-mesa-dri \
     vainfo \
+    weston \
+    seatd \
+    libwayland-client0 \
+    libwayland-cursor0 \
+    libwayland-egl1 \
+    libwayland-server0 \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Google Chrome
@@ -54,7 +63,7 @@ COPY scripts ./scripts
 
 RUN npm run build \
     && npm prune --omit=dev \
-    && chmod +x scripts/container-entrypoint.sh scripts/start-chrome.sh scripts/copy-public.mjs
+    && chmod +x scripts/container-entrypoint.sh scripts/start-chrome.sh scripts/start-weston.sh scripts/copy-public.mjs
 
 EXPOSE 8088 9222
 
@@ -63,6 +72,9 @@ ENV NODE_ENV=production \
     CHROME_DEBUG_PORT=9222 \
     BROWSER_HOME_URL=https://www.bing.com \
     BROWSER_DATA_DIR=/app/data \
-    ENABLE_KIOSK=true
+    BROWSER_MANAGE_CHROME=true \
+    ENABLE_WESTON=true \
+    CHROME_OZONE_PLATFORM=wayland \
+    XDG_RUNTIME_DIR=/tmp/runtime-root
 
 CMD ["./scripts/container-entrypoint.sh"]
