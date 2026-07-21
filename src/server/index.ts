@@ -376,12 +376,22 @@ class ChromeProcessManager {
 
   private clearLocks(): void {
     const dir = this.profileDir();
-    for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    // SingletonLock 常为指向 hostname-pid 的符号链接；目标进程不存在时
+    // existsSync 可能为 false，但仍会挡住新 Chrome —— 必须强制删除
+    const lockNames = [
+      'SingletonLock',
+      'SingletonCookie',
+      'SingletonSocket',
+      'lockfile',
+      'RunningChromeVersion'
+    ];
+    for (const name of lockNames) {
       const path = join(dir, name);
       try {
-        if (existsSync(path)) unlinkSync(path);
+        unlinkSync(path);
+        console.log(`Cleared Chrome profile lock: ${name}`);
       } catch {
-        // ignore
+        // 不存在则忽略
       }
     }
   }

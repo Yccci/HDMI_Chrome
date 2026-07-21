@@ -171,5 +171,18 @@ if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
   exit 1
 fi
 
+# 清理持久化目录里旧容器留下的 Chrome profile 锁（SingletonLock 常为死链）
+PROFILE_DIR="${BROWSER_DATA_DIR}/chrome-profile"
+if [ -d "${PROFILE_DIR}" ]; then
+  log "清理 Chrome profile 锁文件..."
+  rm -f \
+    "${PROFILE_DIR}/SingletonLock" \
+    "${PROFILE_DIR}/SingletonCookie" \
+    "${PROFILE_DIR}/SingletonSocket" \
+    "${PROFILE_DIR}/lockfile" \
+    "${PROFILE_DIR}/RunningChromeVersion" \
+    2>/dev/null || true
+fi
+
 log "启动后端 (Node 将拉起 Chrome)..."
 exec node dist/server/index.js
