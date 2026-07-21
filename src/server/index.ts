@@ -42,8 +42,10 @@ function resolveOzonePlatform(): string {
 
 function buildChromeArgs(config: BrowserConfig, targetUrl: string): string[] {
   const ozone = resolveOzonePlatform();
+  const displayMode = (process.env.DISPLAY_MODE ?? '').toLowerCase();
+  const isVirtual = displayMode === 'virtual' || displayMode === 'xvfb' || displayMode === 'debug';
   const enableGpu = !['0', 'false', 'no'].includes(
-    (process.env.CHROME_ENABLE_GPU ?? 'true').toLowerCase()
+    (process.env.CHROME_ENABLE_GPU ?? (isVirtual ? 'false' : 'true')).toLowerCase()
   );
 
   const args = [
@@ -69,20 +71,33 @@ function buildChromeArgs(config: BrowserConfig, targetUrl: string): string[] {
     args.push('--enable-features=UseOzonePlatform');
   }
 
-  if (enableGpu) {
+  if (enableGpu && !isVirtual) {
+    // 物理屏 / Weston：EGL + VA-API
     args.push(
       '--enable-gpu',
       '--enable-gpu-rasterization',
       '--disable-gpu-sandbox',
-      '--in-process-gpu',
       '--enable-features=VaapiVideoDecoder,VaapiVideoEncoder,VaapiVideoDecodeLinuxGL,CanvasOopRasterization',
       '--enable-accelerated-video-decode',
       '--enable-accelerated-2d-canvas',
-      '--use-gl=egl',
-      '--use-angle=gl-egl'
+      '--use-gl=egl'
+    );
+  } else if (enableGpu && isVirtual) {
+    // Xvfb + 真 EGL 在部分 NAS 上会 SIGTRAP；用 ANGLE 默认实现更稳
+    args.push(
+      '--enable-gpu',
+      '--enable-gpu-rasterization',
+      '--disable-gpu-sandbox',
+      '--use-gl=angle',
+      '--use-angle=default'
     );
   } else {
-    args.push('--disable-gpu', '--use-gl=swiftshader');
+    // 虚拟屏默认：SwiftShader，保证能起 CDP
+    args.push(
+      '--disable-gpu',
+      '--use-gl=angle',
+      '--use-angle=swiftshader'
+    );
   }
 
   args.push(targetUrl);
@@ -522,9 +537,14 @@ class ChromeController {
 class ChromeProcessManager {
   private process: ChildProcess | null = null;
   private config: BrowserConfig;
+  private lastUrl: string;
+  private restarting = false;
+  private stopping = false;
+  private restartAttempts = 0;
 
   constructor(config: BrowserConfig) {
     this.config = config;
+    this.lastUrl = config.homeUrl;
   }
 
   private profileDir(): string {
@@ -558,7 +578,9 @@ class ChromeProcessManager {
       this.stop();
     }
 
-    const targetUrl = url || this.config.homeUrl;
+    this.stopping = false;
+    const targetUrl = url || this.lastUrl || this.config.homeUrl;
+    this.lastUrl = targetUrl;
     const profileDir = this.profileDir();
     mkdirSync(join(profileDir, 'Default'), { recursive: true });
     this.clearLocks();
@@ -595,10 +617,24 @@ class ChromeProcessManager {
     this.process.on('exit', (code, signal) => {
       console.log(`Chrome exited with code ${code} signal ${signal}`);
       this.process = null;
+      if (this.stopping) return;
+      // 意外退出则自动拉起（例如错误的 GPU 参数导致 SIGTRAP）
+      if (this.restartAttempts >= 8) {
+        console.error('Chrome restart limit reached; giving up');
+        return;
+      }
+      this.restartAttempts += 1;
+      const delay = Math.min(10_000, 1000 * this.restartAttempts);
+      console.log(`Restarting Chrome in ${delay}ms (attempt ${this.restartAttempts})...`);
+      setTimeout(() => {
+        if (this.stopping || this.process) return;
+        this.start(this.lastUrl);
+      }, delay);
     });
   }
 
   stop(): void {
+    this.stopping = true;
     if (this.process) {
       this.process.kill('SIGTERM');
       this.process = null;
@@ -606,7 +642,9 @@ class ChromeProcessManager {
   }
 
   restart(url?: string): void {
+    this.restartAttempts = 0;
     this.stop();
+    this.stopping = false;
     this.start(url);
   }
 

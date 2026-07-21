@@ -102,14 +102,12 @@ start_virtual() {
   unset WAYLAND_DISPLAY || true
   export CHROME_OZONE_PLATFORM=x11
 
-  # 虚拟屏也可走 GPU：用 /dev/dri/renderD* 做 EGL/VA-API（不需要 HDMI connected）
+  # Xvfb + EGL/VA-API 在部分设备会 SIGTRAP 秒退；虚拟屏默认软渲染保证 CDP 可用
+  # 需要可设 CHROME_ENABLE_GPU=true（将用 ANGLE，而非 EGL）
   if [ -z "${CHROME_ENABLE_GPU:-}" ]; then
+    CHROME_ENABLE_GPU=false
     if [ -e /dev/dri/renderD128 ] || [ -e /dev/dri/renderD129 ]; then
-      CHROME_ENABLE_GPU=true
-      log "检测到 DRM render 节点 → 虚拟屏启用 GPU (EGL/VA-API)"
-    else
-      CHROME_ENABLE_GPU=false
-      warn "无 /dev/dri/renderD* → 虚拟屏使用软渲染 (SwiftShader)"
+      log "检测到 DRM render 节点；虚拟屏仍默认软渲染（避免 EGL SIGTRAP）。需要可设 CHROME_ENABLE_GPU=true"
     fi
   fi
   export CHROME_ENABLE_GPU
