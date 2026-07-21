@@ -74,9 +74,12 @@ function buildChromeArgs(config: BrowserConfig, targetUrl: string): string[] {
       '--enable-gpu',
       '--enable-gpu-rasterization',
       '--disable-gpu-sandbox',
-      '--enable-features=VaapiVideoDecoder,VaapiVideoEncoder,VaapiVideoDecodeLinuxGL',
+      '--in-process-gpu',
+      '--enable-features=VaapiVideoDecoder,VaapiVideoEncoder,VaapiVideoDecodeLinuxGL,CanvasOopRasterization',
       '--enable-accelerated-video-decode',
-      '--use-gl=egl'
+      '--enable-accelerated-2d-canvas',
+      '--use-gl=egl',
+      '--use-angle=gl-egl'
     );
   } else {
     args.push('--disable-gpu', '--use-gl=swiftshader');
@@ -230,39 +233,41 @@ class ChromeController {
   }
 
   // 获取 GPU 信息
-  async getGpuInfo(): Promise<any> {
+  async getGpuInfo(): Promise<Record<string, unknown>> {
     const result = await this.sendCommand('Runtime.evaluate', {
       expression: `
-        (async () => {
-          const info = {};
-          
-          // 获取 WebGL 信息
-          const canvas = document.createElement('canvas');
-          const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-          if (gl) {
-            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-            if (debugInfo) {
-              info.gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-              info.gpuVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+        (() => {
+          const info = {
+            gpuRenderer: null,
+            gpuVendor: null,
+            webglVersion: null,
+            hardwareAccelerated: false,
+            glBackend: null
+          };
+          try {
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if (gl) {
+              const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+              if (debugInfo) {
+                info.gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                info.gpuVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+              }
+              info.webglVersion = gl.getParameter(gl.VERSION);
+              info.glBackend = gl.getParameter(gl.RENDERER);
+              const label = String(info.gpuRenderer || info.glBackend || '');
+              info.hardwareAccelerated = !/swiftshader|llvmpipe|softpipe|microsoft basic render|cpu/i.test(label);
             }
-            info.webglVersion = gl.getParameter(gl.VERSION);
+          } catch (e) {
+            info.error = String(e);
           }
-          
-          // 检查硬件加速
-          info.hardwareAccelerated = await new Promise(resolve => {
-            const video = document.createElement('video');
-            video.src = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDE=';
-            video.onloadedmetadata = () => resolve(true);
-            video.onerror = () => resolve(false);
-            setTimeout(() => resolve(false), 1000);
-          });
-          
           return JSON.stringify(info);
         })()
       `,
       returnByValue: true
     });
-    return JSON.parse(result.result.value);
+    const value = result?.result?.value;
+    return typeof value === 'string' ? JSON.parse(value) : (value ?? {});
   }
 
   // 鼠标移动
@@ -693,7 +698,17 @@ async function startServer(): Promise<void> {
   app.get('/api/gpu/info', async () => {
     try {
       const gpuInfo = await chrome.getGpuInfo();
-      return gpuInfo;
+      const driRender =
+        existsSync('/dev/dri/renderD128') || existsSync('/dev/dri/renderD129');
+      return {
+        ...gpuInfo,
+        displayMode: process.env.DISPLAY_MODE ?? null,
+        chromeEnableGpu: process.env.CHROME_ENABLE_GPU ?? null,
+        driRenderNode: driRender,
+        note: driRender
+          ? '虚拟屏也可使用 /dev/dri/renderD* 做 EGL/VA-API 加速（无需 HDMI connected）'
+          : '无 DRM render 节点，只能软渲染'
+      };
     } catch (error) {
       return { error: 'Failed to get GPU info' };
     }

@@ -411,10 +411,14 @@
       try {
         const data = await api('/api/gpu/info', 'GET');
         gpuInfoContent.innerHTML = `
-          <div class="gpu-info-item">GPU 渲染器: ${data.gpuRenderer || '未知'}</div>
+          <div class="gpu-info-item">显示模式: ${data.displayMode || '未知'}</div>
+          <div class="gpu-info-item">Chrome GPU: ${data.chromeEnableGpu ?? '未知'}</div>
+          <div class="gpu-info-item">DRM render: ${data.driRenderNode ? '有' : '无'}</div>
+          <div class="gpu-info-item">GPU 渲染器: ${data.gpuRenderer || data.glBackend || '未知'}</div>
           <div class="gpu-info-item">GPU 供应商: ${data.gpuVendor || '未知'}</div>
           <div class="gpu-info-item">WebGL 版本: ${data.webglVersion || '未知'}</div>
           <div class="gpu-info-item">硬件加速: ${data.hardwareAccelerated ? '✅ 是' : '❌ 否'}</div>
+          ${data.note ? `<div class="gpu-info-item">${data.note}</div>` : ''}
         `;
       } catch (error) {
         gpuInfoContent.innerHTML = `<div class="gpu-info-item">获取失败: ${error.message}</div>`;
