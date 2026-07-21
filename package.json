@@ -1,0 +1,36 @@
+{
+  "name": "hdmi-chrome-browser",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HDMI Chrome Browser - 基于 Chrome 的 HDMI 浏览器输出系统",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && esbuild src/server/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist/server/index.js && node scripts/copy-public.mjs",
+    "start": "node dist/server/index.js",
+    "start:chrome": "bash scripts/start-chrome.sh",
+    "verify": "npm run typecheck && npm run build"
+  },
+  "dependencies": {
+    "fastify": "^5.2.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.10",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "keywords": [
+    "hdmi",
+    "chrome",
+    "browser",
+    "kiosk",
+    "display",
+    "remote-control"
+  ],
+  "author": "",
+  "license": "MIT"
+}

@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HDMI Chrome Browser - 屏幕镜像</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #000;
+      color: #fff;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    
+    .header {
+      background: rgba(0,0,0,0.8);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+    }
+    
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: #888;
+    }
+    
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #666;
+    }
+    
+    .status-dot.connected {
+      background: #4ade80;
+    }
+    
+    .status-dot.streaming {
+      background: #e94560;
+      animation: pulse 1s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .url-bar {
+      background: rgba(255,255,255,0.1);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      color: #888;
+      min-width: 300px;
+      text-align: center;
+    }
+    
+    .controls {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .btn {
+      background: rgba(255,255,255,0.1);
+      border: none;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    
+    .btn:hover {
+      background: rgba(255,255,255,0.2);
+    }
+    
+    .btn.primary {
+      background: #e94560;
+    }
+    
+    .btn.primary:hover {
+      background: #c73e54;
+    }
+    
+    .mirror-container {
+      position: fixed;
+      top: 60px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+    
+    .mirror-image {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    
+    .mirror-placeholder {
+      text-align: center;
+      color: #666;
+    }
+    
+    .mirror-placeholder .icon {
+      font-size: 96px;
+      margin-bottom: 24px;
+    }
+    
+    .mirror-placeholder .text {
+      font-size: 18px;
+    }
+    
+    .stats {
+      position: fixed;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(0,0,0,0.7);
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #888;
+    }
+    
+    .stats-item {
+      margin-bottom: 4px;
+    }
+    
+    .stats-item:last-child {
+      margin-bottom: 0;
+    }
+    
+    .settings-panel {
+      position: fixed;
+      top: 60px;
+      right: 16px;
+      background: rgba(0,0,0,0.9);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 20px;
+      min-width: 280px;
+      display: none;
+      z-index: 100;
+    }
+    
+    .settings-panel.show {
+      display: block;
+    }
+    
+    .settings-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .setting-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+    }
+    
+    .setting-label {
+      color: #888;
+      font-size: 14px;
+    }
+    
+    .setting-value {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .slider {
+      width: 140px;
+      -webkit-appearance: none;
+      height: 6px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 3px;
+      outline: none;
+    }
+    
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      background: #e94560;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    
+    .value-display {
+      color: #e94560;
+      font-weight: 600;
+      min-width: 40px;
+      text-align: right;
+    }
+    
+    .gpu-info {
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+    }
+    
+    .gpu-info-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #e94560;
+    }
+    
+    .gpu-info-item {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📺 HDMI Chrome Browser - 屏幕镜像</h1>
+    <div class="header-right">
+      <div class="status">
+        <div class="status-dot" id="connectionDot"></div>
+        <span id="connectionStatus">连接中...</span>
+      </div>
+      <div class="status">
+        <div class="status-dot" id="streamDot"></div>
+        <span id="streamStatus">未推流</span>
+      </div>
+      <div class="url-bar" id="urlDisplay">{{CURRENT_URL}}</div>
+      <div class="controls">
+        <button class="btn" onclick="toggleSettings()">⚙️ 设置</button>
+        <button class="btn" onclick="toggleFullscreen()">⛶ 全屏</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="mirror-container" id="mirrorContainer">
+    <div class="mirror-placeholder" id="placeholder">
+      <div class="icon">📺</div>
+      <div class="text">正在连接电视...</div>
+    </div>
+    <img class="mirror-image" id="mirrorImage" style="display: none;">
+  </div>
+
+  <div class="stats" id="stats">
+    <div class="stats-item">帧率: <span id="fpsDisplay">0 FPS</span></div>
+    <div class="stats-item">分辨率: <span id="resolution">-</span></div>
+    <div class="stats-item">延迟: <span id="latency">-</span> ms</div>
+    <div class="stats-item">客户端: <span id="clientCount">0</span></div>
+  </div>
+
+  <div class="settings-panel" id="settingsPanel">
+    <div class="settings-title">推流设置</div>
+    <div class="setting-item">
+      <span class="setting-label">帧率</span>
+      <div class="setting-value">
+        <input type="range" class="slider" id="fpsSlider" min="1" max="30" value="10">
+        <span class="value-display" id="fpsValue">10</span>
+      </div>
+    </div>
+    <div class="setting-item">
+      <span class="setting-label">画质</span>
+      <div class="setting-value">
+        <input type="range" class="slider" id="qualitySlider" min="10" max="100" value="50">
+        <span class="value-display" id="qualityValue">50</span>
+      </div>
+    </div>
+    <div class="setting-item">
+      <span class="setting-label">显示统计</span>
+      <div class="setting-value">
+        <button class="btn" onclick="toggleStats()">切换</button>
+      </div>
+    </div>
+    <div class="setting-item">
+      <span class="setting-label">GPU 信息</span>
+      <div class="setting-value">
+        <button class="btn" onclick="loadGpuInfo()">刷新</button>
+      </div>
+    </div>
+    <div class="gpu-info" id="gpuInfo" style="display: none;">
+      <div class="gpu-info-title">GPU 信息</div>
+      <div id="gpuInfoContent">加载中...</div>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let frameCount = 0;
+    let lastFrameTime = Date.now();
+    let currentFps = 0;
+    let isConnected = false;
+    let isStreaming = false;
+
+    const mirrorImage = document.getElementById('mirrorImage');
+    const placeholder = document.getElementById('placeholder');
+    const connectionDot = document.getElementById('connectionDot');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const streamDot = document.getElementById('streamDot');
+    const streamStatus = document.getElementById('streamStatus');
+    const fpsDisplay = document.getElementById('fpsDisplay');
+    const resolutionDisplay = document.getElementById('resolution');
+    const latencyDisplay = document.getElementById('latency');
+    const clientCountDisplay = document.getElementById('clientCount');
+    const stats = document.getElementById('stats');
+
+    // WebSocket 连接
+    function connectWebSocket() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws/mirror`);
+      
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        isConnected = true;
+        updateStatus();
+      };
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'frame') {
+          mirrorImage.src = `data:image/jpeg;base64,${data.data}`;
+          mirrorImage.style.display = 'block';
+          placeholder.style.display = 'none';
+          
+          // 计算 FPS
+          frameCount++;
+          const now = Date.now();
+          if (now - lastFrameTime >= 1000) {
+            currentFps = frameCount;
+            frameCount = 0;
+            lastFrameTime = now;
+            fpsDisplay.textContent = `${currentFps} FPS`;
+          }
+          
+          // 计算延迟
+          const latency = Date.now() - data.timestamp;
+          latencyDisplay.textContent = latency;
+          
+          isStreaming = true;
+          updateStatus();
+        }
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        isConnected = false;
+        isStreaming = false;
+        updateStatus();
+        setTimeout(connectWebSocket, 2000);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+    }
+
+    function updateStatus() {
+      connectionDot.className = `status-dot ${isConnected ? 'connected' : ''}`;
+      connectionStatus.textContent = isConnected ? '已连接' : '未连接';
+      
+      streamDot.className = `status-dot ${isStreaming ? 'streaming' : ''}`;
+      streamStatus.textContent = isStreaming ? '推流中' : '未推流';
+    }
+
+    // API 调用
+    async function api(url, method = 'POST', body = null) {
+      const options = { method };
+      if (body) {
+        options.headers = { 'Content-Type': 'application/json' };
+        options.body = JSON.stringify(body);
+      }
+      const response = await fetch(url, options);
+      return response.json();
+    }
+
+    // 加载 GPU 信息
+    async function loadGpuInfo() {
+      const gpuInfoDiv = document.getElementById('gpuInfo');
+      const gpuInfoContent = document.getElementById('gpuInfoContent');
+      
+      gpuInfoDiv.style.display = 'block';
+      gpuInfoContent.innerHTML = '加载中...';
+      
+      try {
+        const data = await api('/api/gpu/info', 'GET');
+        gpuInfoContent.innerHTML = `
+          <div class="gpu-info-item">GPU 渲染器: ${data.gpuRenderer || '未知'}</div>
+          <div class="gpu-info-item">GPU 供应商: ${data.gpuVendor || '未知'}</div>
+          <div class="gpu-info-item">WebGL 版本: ${data.webglVersion || '未知'}</div>
+          <div class="gpu-info-item">硬件加速: ${data.hardwareAccelerated ? '✅ 是' : '❌ 否'}</div>
+        `;
+      } catch (error) {
+        gpuInfoContent.innerHTML = `<div class="gpu-info-item">获取失败: ${error.message}</div>`;
+      }
+    }
+
+    // 切换设置面板
+    function toggleSettings() {
+      document.getElementById('settingsPanel').classList.toggle('show');
+    }
+
+    // 切换统计信息
+    function toggleStats() {
+      stats.style.display = stats.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // 全屏切换
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    // 设置
+    document.getElementById('fpsSlider').addEventListener('input', (e) => {
+      const fps = parseInt(e.target.value);
+      document.getElementById('fpsValue').textContent = fps;
+      api('/api/mirror/settings', 'POST', { fps });
+    });
+
+    document.getElementById('qualitySlider').addEventListener('input', (e) => {
+      const quality = parseInt(e.target.value);
+      document.getElementById('qualityValue').textContent = quality;
+      api('/api/mirror/settings', 'POST', { quality });
+    });
+
+    // 定期更新状态
+    setInterval(async () => {
+      try {
+        const data = await api('/api/url', 'GET');
+        if (data.url) {
+          document.getElementById('urlDisplay').textContent = data.url;
+        }
+        if (data.mirrorClients !== undefined) {
+          clientCountDisplay.textContent = data.mirrorClients;
+        }
+      } catch {}
+    }, 3000);
+
+    // 键盘快捷键
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        document.getElementById('settingsPanel').classList.remove('show');
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        toggleFullscreen();
+      }
+    });
+
+    // 初始化
+    connectWebSocket();
+  </script>
+</body>
+</html>

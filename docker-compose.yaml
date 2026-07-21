@@ -1,0 +1,50 @@
+services:
+  hdmi-chrome-browser:
+    build: .
+    image: hdmi-chrome-browser:latest
+    container_name: hdmi-chrome-browser
+    restart: unless-stopped
+    privileged: true
+
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/snd:/dev/snd
+      - /dev/input:/dev/input
+
+    # host 网络便于本机 HDMI / DevTools 访问；端口映射在 host 模式下无效
+    network_mode: host
+
+    environment:
+      - NODE_ENV=production
+      - BROWSER_PORT=${BROWSER_PORT:-8088}
+      - BROWSER_HOME_URL=${BROWSER_HOME_URL:-https://www.bing.com}
+      - CHROME_DEBUG_PORT=${CHROME_DEBUG_PORT:-9222}
+      - BROWSER_DATA_DIR=/app/data
+      - ENABLE_KIOSK=${ENABLE_KIOSK:-true}
+      - DISPLAY=${DISPLAY:-:0}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+
+    volumes:
+      - hdmi-chrome-data:/app/data
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /dev/dri:/dev/dri
+
+    shm_size: "2gb"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8088/api/url"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  hdmi-chrome-data:
+    driver: local
