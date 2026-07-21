@@ -31,7 +31,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
 
     volumes:
-      - hdmi-chrome-data:/app/data
+      - ./data:/app/data
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
       - /dev/dri:/dev/dri
 
