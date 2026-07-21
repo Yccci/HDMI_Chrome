@@ -576,10 +576,7 @@ class ChromeProcessManager {
       env: {
         ...process.env,
         DISPLAY: process.env.DISPLAY ?? '',
-        WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? '',
-        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? '/tmp/runtime-root',
-        // 减少无 dbus 时的噪音（可选）
-        DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS ?? 'unix:path=/dev/null'
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? '/tmp/runtime-root'
       }
     });
 
@@ -732,17 +729,34 @@ async function startServer(): Promise<void> {
 
   // 等 CDP 端口就绪再连（Chrome 冷启动常超过 2s）
   void (async () => {
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + 90_000;
+    let attempt = 0;
     while (Date.now() < deadline) {
+      attempt += 1;
       try {
         const res = await fetch(`http://127.0.0.1:${config.chromePort}/json/version`);
-        if (res.ok) break;
+        if (res.ok) {
+          const pages = await fetch(`http://127.0.0.1:${config.chromePort}/json`);
+          const list = (await pages.json()) as Array<{ type?: string }>;
+          if (Array.isArray(list) && list.some((t) => t.type === 'page')) {
+            console.log(`Chrome DevTools ready after ${attempt} attempt(s)`);
+            break;
+          }
+        }
       } catch {
         // retry
+      }
+      if (attempt === 1 || attempt % 5 === 0) {
+        console.log(`Waiting for Chrome DevTools on :${config.chromePort} (attempt ${attempt})...`);
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
     await chrome.connect();
+    if (chrome.isConnected()) {
+      console.log('CDP connected; remote mouse/keyboard ready');
+    } else {
+      console.error('CDP still not connected; check Chrome logs above');
+    }
   })();
 
   // WebSocket 服务器用于屏幕镜像
