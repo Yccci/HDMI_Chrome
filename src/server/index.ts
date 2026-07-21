@@ -60,6 +60,7 @@ function buildChromeArgs(config: BrowserConfig, targetUrl: string): string[] {
     `--remote-debugging-port=${config.chromePort}`,
     '--remote-debugging-address=0.0.0.0',
     `--ozone-platform=${ozone}`,
+    '--window-size=1920,1080',
     '--autoplay-policy=no-user-gesture-required',
     '--ignore-gpu-blocklist',
   ];
